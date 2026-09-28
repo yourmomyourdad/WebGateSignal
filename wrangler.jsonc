@@ -1,10 +1,22 @@
 {
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "webgate-signal",
-  "private": true,
-  "scripts": {
-    "deploy": "wrangler deploy"
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-28",
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SIGNALING",
+        "class_name": "Signaling"
+      }
+    ]
   },
-  "devDependencies": {
-    "wrangler": "^4.135.0"
-  }
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Signaling"]
+    }
+  ]
 }
