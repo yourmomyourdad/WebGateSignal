@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "webgate-signal",
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-28",
+  "compatibility_date": "2026-09-30",
 
   "durable_objects": {
     "bindings": [
@@ -13,10 +13,10 @@
     ]
   },
 
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": ["Signaling"]
+  "exports": {
+    "Signaling": {
+      "type": "durable-object",
+      "storage": "sqlite"
     }
-  ]
+  }
 }
