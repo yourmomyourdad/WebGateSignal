@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 interface Env {
-  SIGNALING: DurableObjectNamespace;
+  SIGNALING: DurableObjectNamespace<Signaling>;
 }
 
 const cors = {
@@ -10,48 +10,115 @@ const cors = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-export class Signaling extends DurableObject<Env> {
+export class Signaling extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
 
-    // /signal/<sessionId>/<offer|answer>
-    if (parts.length !== 3 || parts[0] !== "signal") {
-      return json({ error: "Invalid path" }, 400);
+    // GET /signal/offer
+    // Agent consumes the newest offer ONCE.
+    if (
+      request.method === "GET" &&
+      parts.length === 2 &&
+      parts[0] === "signal" &&
+      parts[1] === "offer"
+    ) {
+      const sessionId =
+        await this.ctx.storage.kv.get<string>("latestOfferSession");
+
+      if (!sessionId) {
+        return json(null);
+      }
+
+      const offer =
+        await this.ctx.storage.kv.get(`offer:${sessionId}`);
+
+      // Consume it so it cannot become stale.
+      await this.ctx.storage.kv.delete("latestOfferSession");
+      await this.ctx.storage.kv.delete(`offer:${sessionId}`);
+
+      return json(offer ?? null);
     }
 
-    const type = parts[2];
-
-    if (type !== "offer" && type !== "answer") {
-      return json({ error: "Invalid signal type" }, 400);
-    }
-
-    if (request.method === "POST") {
+    // POST /signal/<sessionId>/offer
+    if (
+      request.method === "POST" &&
+      parts.length === 3 &&
+      parts[0] === "signal" &&
+      parts[2] === "offer"
+    ) {
+      const sessionId = parts[1];
       const data = await request.json();
 
-      await this.ctx.storage.kv.put(type, data);
+      await this.ctx.storage.kv.put(
+        `offer:${sessionId}`,
+        data
+      );
+
+      await this.ctx.storage.kv.put(
+        "latestOfferSession",
+        sessionId
+      );
 
       return json({ ok: true });
     }
 
-    if (request.method === "GET") {
-      const data = await this.ctx.storage.kv.get(type);
+    // GET /signal/<sessionId>/answer
+    if (
+      request.method === "GET" &&
+      parts.length === 3 &&
+      parts[0] === "signal" &&
+      parts[2] === "answer"
+    ) {
+      const sessionId = parts[1];
 
-      return json(data ?? null);
+      const answer =
+        await this.ctx.storage.kv.get(
+          `answer:${sessionId}`
+        );
+
+      return json(answer ?? null);
     }
 
-    return json({ error: "Method not allowed" }, 405);
+    // POST /signal/<sessionId>/answer
+    if (
+      request.method === "POST" &&
+      parts.length === 3 &&
+      parts[0] === "signal" &&
+      parts[2] === "answer"
+    ) {
+      const sessionId = parts[1];
+      const data = await request.json();
+
+      await this.ctx.storage.kv.put(
+        `answer:${sessionId}`,
+        data
+      );
+
+      return json({ ok: true });
+    }
+
+    return json(
+      { error: "Invalid signal request" },
+      400
+    );
   }
 }
 
-function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      ...cors,
-      "Content-Type": "application/json",
-    },
-  });
+function json(
+  data: unknown,
+  status = 200
+): Response {
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        ...cors,
+        "Content-Type": "application/json",
+      },
+    }
+  );
 }
 
 export default {
@@ -59,26 +126,18 @@ export default {
     request: Request,
     env: Env
   ): Promise<Response> {
+
     if (request.method === "OPTIONS") {
       return new Response(null, {
         headers: cors,
       });
     }
 
-    const url = new URL(request.url);
-    const parts = url.pathname.split("/").filter(Boolean);
+    const id =
+      env.SIGNALING.idFromName("mailbox");
 
-    if (parts[0] !== "signal" || !parts[1]) {
-      return json({
-        service: "WebGate signaling",
-        ok: true,
-      });
-    }
-
-    const sessionId = parts[1];
-
-    const id = env.SIGNALING.idFromName(sessionId);
-    const stub = env.SIGNALING.get(id);
+    const stub =
+      env.SIGNALING.get(id);
 
     return stub.fetch(request);
   },
